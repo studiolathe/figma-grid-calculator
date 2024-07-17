@@ -50,7 +50,6 @@
       bottom: 0;
       left: 0;
       right: 0;
-      /* background-color: #f9f9f9; */
     }
 
     .result div {
@@ -72,11 +71,16 @@
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, SFProLocalRange;
     }
 
+    button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+
     button:first-of-type {
       margin-bottom: 4px;
     }
 
-    button:hover {
+    button:hover:not(:disabled) {
       cursor: pointer;
     }
 
@@ -129,17 +133,50 @@
     const gutterWidthInput = document.getElementById('gutterWidth');
     const marginWidthInput = document.getElementById('marginWidth');
     const resultDiv = document.getElementById('result');
+    const calculateButton = document.getElementById('calculate');
+    const createVariablesButton = document.getElementById('create-variables');
+
+    let isResultExact = false;
+
+    function validateInputs() {
+      const maxWidth = parseFloat(maxWidthInput.value);
+      const columns = parseInt(columnsInput.value);
+      const gutterWidth = parseFloat(gutterWidthInput.value);
+      const marginWidth = parseFloat(marginWidthInput.value);
+
+      console.log(`maxWidth: ${maxWidth}, columns: ${columns}, gutterWidth: ${gutterWidth}, marginWidth: ${marginWidth}`);
+
+      const isValid = !isNaN(maxWidth) && maxWidth > 0 &&
+        !isNaN(columns) && columns > 0 &&
+        !isNaN(gutterWidth) && gutterWidth >= 0 &&
+        !isNaN(marginWidth) && marginWidth >= 0;
+
+      console.log(`Validation: ${isValid}`);
+      return isValid;
+    }
+
+    function updateButtonStates() {
+      const inputsValid = validateInputs();
+      calculateButton.disabled = !inputsValid || !isResultExact;
+      createVariablesButton.disabled = !inputsValid || !isResultExact;
+    }
 
     function calculateAndDisplayResults() {
-      const maxWidth = maxWidthInput.value;
-      const columns = columnsInput.value;
-      const gutterWidth = gutterWidthInput.value;
-      const marginWidth = marginWidthInput.value;
+      const inputsValid = validateInputs();
+      if (inputsValid) {
+        const maxWidth = maxWidthInput.value;
+        const columns = columnsInput.value;
+        const gutterWidth = gutterWidthInput.value;
+        const marginWidth = marginWidthInput.value;
 
-      parent.postMessage({ pluginMessage: { type: 'calculate-grid', maxWidth, columns, gutterWidth, marginWidth, displayOnly: true } }, '*');
+        parent.postMessage({ pluginMessage: { type: 'calculate-grid', maxWidth, columns, gutterWidth, marginWidth, displayOnly: true } }, '*');
+      }
+      updateButtonStates();
     }
 
     function createGrid() {
+      if (!validateInputs()) return;
+
       const maxWidth = maxWidthInput.value;
       const columns = columnsInput.value;
       const gutterWidth = gutterWidthInput.value;
@@ -167,18 +204,22 @@
       parent.postMessage({ pluginMessage: { type: 'create-variables', columnWidth, columns, gutterWidth } }, '*');
     };
 
-    // Call the function initially to show default results
+    // Call the function initially to show default results and validate inputs
     calculateAndDisplayResults();
 
     onmessage = event => {
       const message = event.data.pluginMessage;
       if (message.type === 'result') {
+        isResultExact = message.isExact;
         resultDiv.innerHTML = `
           <div class="flex-column ${message.isExact ? 'exact' : 'not-exact'}"><span>Page Width:</span><span class="tab-numbers page-width">${message.pageWidth}px</span></div>
           <div class="flex-column ${message.isExact ? 'exact' : 'not-exact'}"><span>Column Width:</span><span class="tab-numbers column-width">${message.columnWidth}px</span></div>
         `;
+        updateButtonStates();
       } else if (message.type === 'error') {
         resultDiv.innerHTML = `<p style="color: red;">${message.message}</p>`;
+        isResultExact = false;
+        updateButtonStates();
       } else if (message.type === 'variables-created') {
         alert('Variables created successfully.');
       }

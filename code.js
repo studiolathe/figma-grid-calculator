@@ -28,6 +28,11 @@ figma.ui.onmessage = msg => {
         isExact: isExact
       });
     } else {
+      // Calculate the center of the viewport
+      const viewportCenter = figma.viewport.center;
+      const frameX = viewportCenter.x - maxWidth / 2;
+      const frameY = viewportCenter.y - 450; // Half of the frame height
+
       // Create a frame with the specified container width if the calculation is exact
       if (isExact) {
         const frame = figma.createFrame();
@@ -41,7 +46,13 @@ figma.ui.onmessage = msg => {
           count: columnCount,
         }];
 
+        console.log(frame);
+
         frame.name = `${maxWidth}px - ${columnCount} columns (${columnWidth}px)`; // Set the name of the frame
+
+        // Set the frame position to center it in the viewport
+        frame.x = frameX;
+        frame.y = frameY;
 
         figma.viewport.scrollAndZoomIntoView([frame]);
       }
