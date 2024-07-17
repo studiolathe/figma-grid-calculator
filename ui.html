@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <style>
+    body {
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, SFProLocalRange;
+      font-size: 11px;
+    }
+
+    .content {
+      position: relative;
+      height: 100%;
+    }
+
+    .flex-row {
+      display: flex;
+      flex-direction: row;
+      gap: 8px;
+    }
+
+    .flex-column {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .tab-numbers {
+      font-variant-numeric: tabular-nums;
+    }
+
+    .input-group {
+      margin-bottom: 8px;
+    }
+
+    .input-group label {
+      display: block;
+      margin-bottom: 4px;
+    }
+
+    .input-group input {
+      width: 100%;
+      padding: 6px 8px;
+      font-size: 11px;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, SFProLocalRange;
+      outline: none;
+    }
+
+    .result-container {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      /* background-color: #f9f9f9; */
+    }
+
+    .result div {
+      width: 50%;
+      padding-bottom: 8px;
+    }
+
+    .result p {
+      margin: 0;
+      padding: 4px;
+    }
+
+    button {
+      background-color: #000000;
+      color: #ffffff;
+      border: none;
+      border-radius: .375rem;
+      height: 2rem;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Ubuntu, Cantarell, Noto Sans, sans-serif, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", sans-serif, SFProLocalRange;
+    }
+
+    button:first-of-type {
+      margin-bottom: 4px;
+    }
+
+    button:hover {
+      cursor: pointer;
+    }
+
+    .exact {
+      color: green;
+    }
+
+    .not-exact {
+      color: red;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="content">
+    <div class="flex-column">
+      <div class="flex-row">
+        <div class="input-group">
+          <label for="maxWidth">Max Width</label>
+          <input type="number" class="tab-numbers" id="maxWidth" value="1440" />
+        </div>
+        <div class="input-group">
+          <label for="columns">Columns</label>
+          <input type="number" class="tab-numbers" id="columns" value="12" />
+        </div>
+      </div>
+      <div class="flex-row">
+        <div class="input-group">
+          <label for="gutterWidth">Gutter Width</label>
+          <input type="number" class="tab-numbers" id="gutterWidth" value="24" />
+        </div>
+        <div class="input-group">
+          <label for="marginWidth">Margin Width</label>
+          <input type="number" class="tab-numbers" id="marginWidth" value="72" />
+        </div>
+      </div>
+      <div class="result-container">
+        <div class="flex-column">
+          <div class="result flex-row" id="result"></div>
+          <button id="calculate">Create Grid</button>
+          <button id="create-variables">Create Column Width Variables</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const maxWidthInput = document.getElementById('maxWidth');
+    const columnsInput = document.getElementById('columns');
+    const gutterWidthInput = document.getElementById('gutterWidth');
+    const marginWidthInput = document.getElementById('marginWidth');
+    const resultDiv = document.getElementById('result');
+
+    function calculateAndDisplayResults() {
+      const maxWidth = maxWidthInput.value;
+      const columns = columnsInput.value;
+      const gutterWidth = gutterWidthInput.value;
+      const marginWidth = marginWidthInput.value;
+
+      parent.postMessage({ pluginMessage: { type: 'calculate-grid', maxWidth, columns, gutterWidth, marginWidth, displayOnly: true } }, '*');
+    }
+
+    function createGrid() {
+      const maxWidth = maxWidthInput.value;
+      const columns = columnsInput.value;
+      const gutterWidth = gutterWidthInput.value;
+      const marginWidth = marginWidthInput.value;
+
+      parent.postMessage({ pluginMessage: { type: 'calculate-grid', maxWidth, columns, gutterWidth, marginWidth, displayOnly: false } }, '*');
+    }
+
+    // Add event listeners to run the calculation on input change
+    maxWidthInput.addEventListener('input', calculateAndDisplayResults);
+    columnsInput.addEventListener('input', calculateAndDisplayResults);
+    gutterWidthInput.addEventListener('input', calculateAndDisplayResults);
+    marginWidthInput.addEventListener('input', calculateAndDisplayResults);
+
+    document.getElementById('calculate').onclick = () => {
+      createGrid();
+    };
+
+    document.getElementById('create-variables').onclick = () => {
+      const columnWidthText = resultDiv.querySelector('.column-width')?.innerText;
+      const columnWidth = parseFloat(columnWidthText.replace('px', '').trim());
+      const gutterWidthText = gutterWidthInput.value;
+      const gutterWidth = parseFloat(gutterWidthText);
+      const columns = columnsInput.value;
+      parent.postMessage({ pluginMessage: { type: 'create-variables', columnWidth, columns, gutterWidth } }, '*');
+    };
+
+    // Call the function initially to show default results
+    calculateAndDisplayResults();
+
+    onmessage = event => {
+      const message = event.data.pluginMessage;
+      if (message.type === 'result') {
+        resultDiv.innerHTML = `
+          <div class="flex-column ${message.isExact ? 'exact' : 'not-exact'}"><span>Page Width:</span><span class="tab-numbers page-width">${message.pageWidth}px</span></div>
+          <div class="flex-column ${message.isExact ? 'exact' : 'not-exact'}"><span>Column Width:</span><span class="tab-numbers column-width">${message.columnWidth}px</span></div>
+        `;
+      } else if (message.type === 'error') {
+        resultDiv.innerHTML = `<p style="color: red;">${message.message}</p>`;
+      } else if (message.type === 'variables-created') {
+        alert('Variables created successfully.');
+      }
+    };
+  </script>
+</body>
+
+</html>
