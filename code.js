@@ -1,93 +1,100 @@
 figma.showUI(__html__, {
-  height: 400
+  width: 360,
+  height: 600
 });
 
-figma.ui.onmessage = msg => {
-  if (msg.type === 'calculate-grid') {
-    const columnCount = parseInt(msg.columns);
-    const gutterWidth = parseFloat(msg.gutterWidth);
-    const maxWidth = parseFloat(msg.maxWidth);
-    const marginWidth = parseFloat(msg.marginWidth);
-
-    if (isNaN(columnCount) || isNaN(gutterWidth) || isNaN(maxWidth) || isNaN(marginWidth) || columnCount <= 0 || gutterWidth < 0 || maxWidth <= 0 || marginWidth < 0) {
-      figma.ui.postMessage({ type: 'error', message: 'Invalid input values' });
-      return;
+figma.ui.onmessage = async (msg) => {
+  try {
+    if (msg.type === 'create-grids') {
+      await createGrids(msg.devices);
+      figma.ui.postMessage({ type: 'grids-created' });
+    } else if (msg.type === 'create-variables') {
+      await createResponsiveVariables(msg.devices);
+      figma.ui.postMessage({ type: 'variables-created' });
     }
-
-    const containerWidth = maxWidth - 2 * marginWidth;
-    const totalGutterWidth = gutterWidth * (columnCount - 1);
-    const columnWidth = (containerWidth - totalGutterWidth) / columnCount;
-
-    const isExact = Number.isInteger(columnWidth);
-
-    if (msg.displayOnly) {
-      figma.ui.postMessage({
-        type: 'result',
-        columnWidth: columnWidth.toFixed(2),
-        pageWidth: (containerWidth + 2 * marginWidth).toFixed(2),
-        isExact: isExact
-      });
-    } else {
-      // Calculate the center of the viewport
-      const viewportCenter = figma.viewport.center;
-      const frameX = viewportCenter.x - maxWidth / 2;
-      const frameY = viewportCenter.y - 450; // Half of the frame height
-
-      // Create a frame with the specified container width if the calculation is exact
-      if (isExact) {
-        const frame = figma.createFrame();
-        frame.resizeWithoutConstraints(maxWidth, 900); // Adjust the height as needed
-        frame.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }]; // Set the background color
-        frame.layoutGrids = [{
-          pattern: 'COLUMNS',
-          sectionSize: columnWidth,
-          gutterSize: gutterWidth,
-          alignment: 'CENTER',
-          count: columnCount,
-        }];
-
-        console.log(frame);
-
-        frame.name = `${maxWidth}px - ${columnCount} columns (${columnWidth}px)`; // Set the name of the frame
-
-        // Set the frame position to center it in the viewport
-        frame.x = frameX;
-        frame.y = frameY;
-
-        figma.viewport.scrollAndZoomIntoView([frame]);
-      }
-
-      figma.ui.postMessage({
-        type: 'result',
-        columnWidth: columnWidth,
-        pageWidth: (containerWidth + 2 * marginWidth),
-        isExact: isExact
-      });
-    }
-  } else if (msg.type === 'create-variables') {
-    const columnWidth = parseFloat(msg.columnWidth);
-    const columnCount = parseInt(msg.columns);
-    const gutterWidth = parseFloat(msg.gutterWidth);
-
-    if (isNaN(columnWidth) || isNaN(columnCount) || columnCount <= 0) {
-      figma.ui.postMessage({ type: 'error', message: 'Invalid input values for creating variables' });
-      return;
-    }
-
-    // Create a variable collection
-    const collection = figma.variables.createVariableCollection("Column Widths");
-    const collectionModeId = collection.modes[0].modeId;
-
-    // Create variables for each column count
-    for (let i = 1; i <= columnCount; i++) {
-      const variable = figma.variables.createVariable(`${i} col`, collection, "FLOAT");
-      if (i === 1) {
-        variable.setValueForMode(collectionModeId, columnWidth);
-      } else {
-        variable.setValueForMode(collectionModeId, (columnWidth * i + gutterWidth * (i - 1)));
-      }
-    }
-
-    figma.ui.postMessage({ type: 'variables-created' });
+  } catch (err) {
+    console.error(err);
+    figma.ui.postMessage({ type: 'error', message: err && err.message ? err.message : String(err) });
   }
 };
+
+async function createGrids(devices) {
+  if (!Array.isArray(devices) || devices.length === 0) {
+    throw new Error('No devices provided');
+  }
+
+  const frameHeight = 900;
+  const verticalGap = 80;
+  const center = figma.viewport.center;
+  const totalHeight = devices.length * frameHeight + (devices.length - 1) * verticalGap;
+  const startY = center.y - totalHeight / 2;
+  const frames = [];
+
+  devices.forEach((device, index) => {
+    const frame = figma.createFrame();
+    frame.resizeWithoutConstraints(device.maxWidth, frameHeight);
+    frame.fills = [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 } }];
+    frame.layoutGrids = [{
+      pattern: 'COLUMNS',
+      sectionSize: device.columnWidth,
+      gutterSize: device.gutterWidth,
+      alignment: 'CENTER',
+      count: device.columns,
+    }];
+    frame.name = `${device.name} — ${device.maxWidth}px / ${device.columns}col (${device.columnWidth}px)`;
+    frame.x = center.x - device.maxWidth / 2;
+    frame.y = startY + index * (frameHeight + verticalGap);
+    frames.push(frame);
+  });
+
+  figma.viewport.scrollAndZoomIntoView(frames);
+}
+
+async function createResponsiveVariables(devices) {
+  if (!Array.isArray(devices) || devices.length === 0) {
+    throw new Error('No devices provided');
+  }
+
+  const collection = figma.variables.createVariableCollection('Responsive Tokens');
+
+  // Rename the auto-created first mode and add the rest.
+  collection.renameMode(collection.modes[0].modeId, devices[0].name);
+  for (let i = 1; i < devices.length; i++) {
+    collection.addMode(devices[i].name);
+  }
+
+  // Refresh modes list so each entry has a stable modeId in declaration order.
+  const modeIds = collection.modes.map(m => m.modeId);
+
+  const setForAll = (variable, valueFn) => {
+    devices.forEach((device, i) => {
+      variable.setValueForMode(modeIds[i], valueFn(device));
+    });
+  };
+
+  const deviceVar = figma.variables.createVariable('device', collection, 'STRING');
+  setForAll(deviceVar, (d) => String(d.name).toLowerCase());
+
+  const screenWidthVar = figma.variables.createVariable('displays/screen-width', collection, 'FLOAT');
+  setForAll(screenWidthVar, (d) => d.maxWidth);
+
+  const columnCountVar = figma.variables.createVariable('grid/column-count', collection, 'FLOAT');
+  setForAll(columnCountVar, (d) => d.columns);
+
+  const marginVar = figma.variables.createVariable('grid/margin', collection, 'FLOAT');
+  setForAll(marginVar, (d) => d.marginWidth);
+
+  const gutterVar = figma.variables.createVariable('grid/gutter', collection, 'FLOAT');
+  setForAll(gutterVar, (d) => d.gutterWidth);
+
+  const maxCols = devices.reduce((m, d) => Math.max(m, d.columns), 0);
+  for (let i = 1; i <= maxCols; i++) {
+    const v = figma.variables.createVariable(`grid/column-widths/${i} col`, collection, 'FLOAT');
+    setForAll(v, (d) => {
+      if (i <= d.columns) {
+        return d.columnWidth * i + d.gutterWidth * (i - 1);
+      }
+      return d.contentWidth;
+    });
+  }
+}
