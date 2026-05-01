@@ -10,7 +10,9 @@ const PREVIEW_GAP = 80;
 
 figma.ui.onmessage = async (msg) => {
   try {
-    if (msg.type === 'sync-preview') {
+    if (msg.type === 'request-init') {
+      figma.ui.postMessage({ type: 'init', devices: hydrateFromCollection() });
+    } else if (msg.type === 'sync-preview') {
       syncPreviewFrames(msg.devices, msg.showPreview !== false);
     } else if (msg.type === 'upsert-variables') {
       upsertResponsiveVariables(msg.devices);
@@ -21,6 +23,44 @@ figma.ui.onmessage = async (msg) => {
     figma.ui.postMessage({ type: 'error', message: err && err.message ? err.message : String(err) });
   }
 };
+
+// --- Hydration from existing collection ----------------------------------
+
+function hydrateFromCollection() {
+  const collection = findCollection(COLLECTION_NAME);
+  if (!collection || collection.modes.length === 0) return null;
+
+  const allFloat = figma.variables.getLocalVariables('FLOAT');
+  const findVar = (name) => allFloat.find(v =>
+    v.variableCollectionId === collection.id && v.name === name);
+
+  const screenWidth = findVar('displays/screen-width');
+  const colCount = findVar('grid/column-count');
+  const margin = findVar('grid/margin');
+  const gutter = findVar('grid/gutter');
+
+  if (!screenWidth || !colCount || !margin || !gutter) return null;
+
+  const readFloat = (variable, modeId) => {
+    const v = variable.valuesByMode[modeId];
+    return typeof v === 'number' ? v : NaN;
+  };
+
+  const devices = collection.modes.map(mode => ({
+    name: mode.name,
+    maxWidth: readFloat(screenWidth, mode.modeId),
+    columns: readFloat(colCount, mode.modeId),
+    gutterWidth: readFloat(gutter, mode.modeId),
+    marginWidth: readFloat(margin, mode.modeId),
+  }));
+
+  // Reject if any value is non-numeric (likely an alias to another collection).
+  if (devices.some(d => !Number.isFinite(d.maxWidth) || !Number.isFinite(d.columns) ||
+                        !Number.isFinite(d.gutterWidth) || !Number.isFinite(d.marginWidth))) {
+    return null;
+  }
+  return devices;
+}
 
 // --- Preview frames -------------------------------------------------------
 
@@ -167,6 +207,17 @@ function upsertResponsiveVariables(devices) {
     collection.renameMode(collection.modes[0].modeId, devices[0].name);
   }
 
+  // Migrate legacy variable names (preserves bindings).
+  const legacyWidthRegex = /^grid\/column-widths\/(\d+) col$/;
+  const legacyPushRegex = /^grid\/push\/column-push-(\d+)$/;
+  figma.variables.getLocalVariables('FLOAT').forEach(v => {
+    if (v.variableCollectionId !== collection.id) return;
+    const widthMatch = legacyWidthRegex.exec(v.name);
+    if (widthMatch) { v.name = `grid/column-widths/col-span-${widthMatch[1]}`; return; }
+    const pushMatch = legacyPushRegex.exec(v.name);
+    if (pushMatch) { v.name = `grid/push/col-push-${pushMatch[1]}`; }
+  });
+
   const modeIds = reconcileModes(collection, devices);
 
   const setForAll = (variable, valueFn) => {
@@ -190,23 +241,36 @@ function upsertResponsiveVariables(devices) {
   setForAll(upsertVariable(collection, 'grid/gutter', 'FLOAT'),
     (d) => d.gutterWidth);
 
+  setForAll(upsertVariable(collection, 'grid/column-width', 'FLOAT'),
+    (d) => d.columnWidth);
+
   const maxCols = devices.reduce((m, d) => Math.max(m, d.columns), 0);
   for (let i = 1; i <= maxCols; i++) {
-    const v = upsertVariable(collection, `grid/column-widths/${i} col`, 'FLOAT');
-    setForAll(v, (d) => {
-      if (i <= d.columns) {
-        return d.columnWidth * i + d.gutterWidth * (i - 1);
-      }
+    const widthVar = upsertVariable(collection, `grid/column-widths/col-span-${i}`, 'FLOAT');
+    setForAll(widthVar, (d) => {
+      if (i <= d.columns) return d.columnWidth * i + d.gutterWidth * (i - 1);
+      return d.contentWidth;
+    });
+
+    const pushVar = upsertVariable(collection, `grid/push/col-push-${i}`, 'FLOAT');
+    setForAll(pushVar, (d) => {
+      if (i <= d.columns) return d.columnWidth * i + d.gutterWidth * (i - 1);
       return d.contentWidth;
     });
   }
 
-  // Prune stale column-width variables beyond maxCols.
-  const colWidthRegex = /^grid\/column-widths\/(\d+) col$/;
+  // Prune stale col-span and col-push variables beyond maxCols.
+  const colWidthRegex = /^grid\/column-widths\/col-span-(\d+)$/;
+  const colPushRegex = /^grid\/push\/col-push-(\d+)$/;
   figma.variables.getLocalVariables('FLOAT').forEach(v => {
     if (v.variableCollectionId !== collection.id) return;
-    const match = colWidthRegex.exec(v.name);
-    if (match && parseInt(match[1], 10) > maxCols) {
+    const widthMatch = colWidthRegex.exec(v.name);
+    if (widthMatch && parseInt(widthMatch[1], 10) > maxCols) {
+      v.remove();
+      return;
+    }
+    const pushMatch = colPushRegex.exec(v.name);
+    if (pushMatch && parseInt(pushMatch[1], 10) > maxCols) {
       v.remove();
     }
   });

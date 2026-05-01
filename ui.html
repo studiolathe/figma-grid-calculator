@@ -443,7 +443,16 @@
     onmessage = (event) => {
       const msg = event.data.pluginMessage;
       if (!msg) return;
-      if (msg.type === 'error') {
+      if (msg.type === 'init') {
+        if (Array.isArray(msg.devices) && msg.devices.length > 0) {
+          devices = msg.devices.map(d => ({ ...d }));
+        }
+        if (!window.__initRendered) {
+          window.__initRendered = true;
+          render();
+          pushPreview();
+        }
+      } else if (msg.type === 'error') {
         setStatus(msg.message, 'err');
       } else if (msg.type === 'variables-updated') {
         setStatus(msg.silent ? 'Variables synced' : 'Variables updated', 'ok');
@@ -452,9 +461,16 @@
       }
     };
 
-    render();
-    // Initial preview push so frames appear immediately on open.
-    pushPreview();
+    // Ask plugin for hydrated defaults from existing Responsive Tokens collection.
+    parent.postMessage({ pluginMessage: { type: 'request-init' } }, '*');
+    // Fallback: if plugin doesn't respond within 800ms (e.g. older version), render defaults.
+    setTimeout(() => {
+      if (!window.__initRendered) {
+        window.__initRendered = true;
+        render();
+        pushPreview();
+      }
+    }, 800);
   </script>
 </body>
 
