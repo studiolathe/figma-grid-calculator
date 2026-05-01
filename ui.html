@@ -237,9 +237,17 @@
     const liveVarsToggle = document.getElementById('live-vars');
     const statusEl = document.getElementById('status');
 
-    // Restore toggle state.
-    showPreviewToggle.checked = localStorage.getItem('gridcalc.showPreview') !== '0';
-    liveVarsToggle.checked = localStorage.getItem('gridcalc.liveVars') === '1';
+    // Restore toggle state. Figma plugin iframes can throw on localStorage access,
+    // so guard everything.
+    function readPref(key, fallback) {
+      try { const v = localStorage.getItem(key); return v == null ? fallback : v; }
+      catch (e) { return fallback; }
+    }
+    function writePref(key, value) {
+      try { localStorage.setItem(key, value); } catch (e) { /* ignore */ }
+    }
+    showPreviewToggle.checked = readPref('gridcalc.showPreview', '1') !== '0';
+    liveVarsToggle.checked = readPref('gridcalc.liveVars', '0') === '1';
 
     function compute(device) {
       const { maxWidth, columns, gutterWidth, marginWidth } = device;
@@ -412,12 +420,12 @@
     });
 
     showPreviewToggle.addEventListener('change', () => {
-      localStorage.setItem('gridcalc.showPreview', showPreviewToggle.checked ? '1' : '0');
+      writePref('gridcalc.showPreview', showPreviewToggle.checked ? '1' : '0');
       pushPreview();
     });
 
     liveVarsToggle.addEventListener('change', () => {
-      localStorage.setItem('gridcalc.liveVars', liveVarsToggle.checked ? '1' : '0');
+      writePref('gridcalc.liveVars', liveVarsToggle.checked ? '1' : '0');
       if (liveVarsToggle.checked) sendLiveVars();
     });
 
