@@ -133,6 +133,35 @@
 
     .add-btn:hover { background: #f0f8ff; }
 
+    .toggles {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      padding: 8px 10px;
+      border: 1px solid #ececec;
+      border-radius: 6px;
+      background: #fafafa;
+    }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 11px;
+    }
+
+    .toggle-row label {
+      flex: 1;
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .toggle-row input[type="checkbox"] {
+      margin: 0;
+      cursor: pointer;
+    }
+
     .actions {
       display: flex;
       flex-direction: column;
@@ -159,6 +188,15 @@
     .actions button:hover:not(:disabled) {
       background: #222;
     }
+
+    .status {
+      font-size: 10px;
+      color: #666;
+      text-align: center;
+      min-height: 12px;
+    }
+    .status.ok { color: #198754; }
+    .status.err { color: #dc3545; }
   </style>
 </head>
 
@@ -166,10 +204,20 @@
   <div class="layout">
     <div class="cards" id="cards"></div>
     <button class="add-btn" id="add-device">+ Add Device</button>
-    <div class="actions">
-      <button id="create-grid">Create Grid</button>
-      <button id="create-variables">Create Responsive Variables</button>
+    <div class="toggles">
+      <div class="toggle-row">
+        <label for="show-preview">Show preview frames</label>
+        <input type="checkbox" id="show-preview" />
+      </div>
+      <div class="toggle-row">
+        <label for="live-vars">Live update variables</label>
+        <input type="checkbox" id="live-vars" />
+      </div>
     </div>
+    <div class="actions">
+      <button id="update-variables">Update Responsive Variables</button>
+    </div>
+    <div class="status" id="status"></div>
   </div>
 
   <script>
@@ -178,15 +226,20 @@
       { name: 'Tablet',  maxWidth: 1024, columns: 12, gutterWidth: 20, marginWidth: 80 },
       { name: 'Mobile',  maxWidth: 390,  columns: 6,  gutterWidth: 14, marginWidth: 16 },
     ];
-
     const fallbackNames = ['Desktop', 'Tablet', 'Mobile', 'Watch', 'TV', 'Custom'];
 
     let devices = defaults.map(d => ({ ...d }));
 
     const cardsEl = document.getElementById('cards');
     const addBtn = document.getElementById('add-device');
-    const createGridBtn = document.getElementById('create-grid');
-    const createVarsBtn = document.getElementById('create-variables');
+    const updateVarsBtn = document.getElementById('update-variables');
+    const showPreviewToggle = document.getElementById('show-preview');
+    const liveVarsToggle = document.getElementById('live-vars');
+    const statusEl = document.getElementById('status');
+
+    // Restore toggle state.
+    showPreviewToggle.checked = localStorage.getItem('gridcalc.showPreview') !== '0';
+    liveVarsToggle.checked = localStorage.getItem('gridcalc.liveVars') === '1';
 
     function compute(device) {
       const { maxWidth, columns, gutterWidth, marginWidth } = device;
@@ -211,6 +264,71 @@
     function fmt(n) {
       if (!Number.isFinite(n)) return '—';
       return Number.isInteger(n) ? `${n}px` : `${n.toFixed(2)}px`;
+    }
+
+    function escapeAttr(s) {
+      return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+    }
+
+    function buildPayload() {
+      return devices.map(d => {
+        const r = compute(d);
+        return { ...d, columnWidth: r.columnWidth, contentWidth: r.contentWidth };
+      });
+    }
+
+    function allValid() {
+      return devices.length > 0 && devices.every(d => compute(d).isExact);
+    }
+
+    function updateButtons() {
+      updateVarsBtn.disabled = !allValid();
+    }
+
+    function setStatus(text, kind) {
+      statusEl.textContent = text || '';
+      statusEl.className = 'status' + (kind ? ' ' + kind : '');
+    }
+
+    function debounce(fn, ms) {
+      let t;
+      return function (...args) {
+        clearTimeout(t);
+        t = setTimeout(() => fn.apply(null, args), ms);
+      };
+    }
+
+    const sendPreview = debounce(() => {
+      if (!allValid()) return;
+      parent.postMessage({
+        pluginMessage: {
+          type: 'sync-preview',
+          devices: buildPayload(),
+          showPreview: showPreviewToggle.checked,
+        }
+      }, '*');
+    }, 150);
+
+    const sendLiveVars = debounce(() => {
+      if (!liveVarsToggle.checked) return;
+      if (!allValid()) return;
+      parent.postMessage({
+        pluginMessage: {
+          type: 'upsert-variables',
+          devices: buildPayload(),
+          silent: true,
+        }
+      }, '*');
+    }, 250);
+
+    function pushPreview() {
+      // Always notify (even if devices invalid, plugin no-ops).
+      sendPreview();
+    }
+
+    function pushPreviewAndLive() {
+      pushPreview();
+      sendLiveVars();
     }
 
     function render() {
@@ -242,7 +360,7 @@
               <input type="number" data-field="marginWidth" data-index="${index}" value="${device.marginWidth}" />
             </div>
           </div>
-          <div class="feedback ${result.valid ? (result.isExact ? 'exact' : 'not-exact') : 'not-exact'}">
+          <div class="feedback ${result.valid && result.isExact ? 'exact' : 'not-exact'}">
             <div><span class="label">Page Width</span><span class="value">${fmt(result.pageWidth)}</span></div>
             <div><span class="label">Column Width</span><span class="value">${fmt(result.columnWidth)}</span></div>
           </div>
@@ -250,16 +368,6 @@
         cardsEl.appendChild(card);
       });
       updateButtons();
-    }
-
-    function escapeAttr(s) {
-      return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
-    }
-
-    function updateButtons() {
-      const allOk = devices.length > 0 && devices.every(d => compute(d).isExact);
-      createGridBtn.disabled = !allOk;
-      createVarsBtn.disabled = !allOk;
     }
 
     cardsEl.addEventListener('input', (e) => {
@@ -274,7 +382,7 @@
       } else {
         devices[index][field] = parseFloat(t.value);
       }
-      // Update only feedback + buttons (avoid full re-render so inputs keep focus)
+      // Update feedback in place to preserve focus.
       const card = t.closest('.card');
       const result = compute(devices[index]);
       const fb = card.querySelector('.feedback');
@@ -283,6 +391,7 @@
       values[0].textContent = fmt(result.pageWidth);
       values[1].textContent = fmt(result.columnWidth);
       updateButtons();
+      pushPreviewAndLive();
     });
 
     cardsEl.addEventListener('click', (e) => {
@@ -291,6 +400,7 @@
       const index = parseInt(btn.dataset.index, 10);
       devices.splice(index, 1);
       render();
+      pushPreviewAndLive();
     });
 
     addBtn.addEventListener('click', () => {
@@ -298,39 +408,45 @@
       const name = fallbackNames.find(n => !used.has(n)) || `Device ${devices.length + 1}`;
       devices.push({ name, maxWidth: 1440, columns: 12, gutterWidth: 24, marginWidth: 72 });
       render();
+      pushPreviewAndLive();
     });
 
-    createGridBtn.addEventListener('click', () => {
-      if (createGridBtn.disabled) return;
-      const payload = devices.map(d => {
-        const r = compute(d);
-        return { ...d, columnWidth: r.columnWidth };
-      });
-      parent.postMessage({ pluginMessage: { type: 'create-grids', devices: payload } }, '*');
+    showPreviewToggle.addEventListener('change', () => {
+      localStorage.setItem('gridcalc.showPreview', showPreviewToggle.checked ? '1' : '0');
+      pushPreview();
     });
 
-    createVarsBtn.addEventListener('click', () => {
-      if (createVarsBtn.disabled) return;
-      const payload = devices.map(d => {
-        const r = compute(d);
-        return { ...d, columnWidth: r.columnWidth, contentWidth: r.contentWidth };
-      });
-      parent.postMessage({ pluginMessage: { type: 'create-variables', devices: payload } }, '*');
+    liveVarsToggle.addEventListener('change', () => {
+      localStorage.setItem('gridcalc.liveVars', liveVarsToggle.checked ? '1' : '0');
+      if (liveVarsToggle.checked) sendLiveVars();
+    });
+
+    updateVarsBtn.addEventListener('click', () => {
+      if (updateVarsBtn.disabled) return;
+      parent.postMessage({
+        pluginMessage: {
+          type: 'upsert-variables',
+          devices: buildPayload(),
+          silent: false,
+        }
+      }, '*');
     });
 
     onmessage = (event) => {
       const msg = event.data.pluginMessage;
       if (!msg) return;
       if (msg.type === 'error') {
-        alert(msg.message);
-      } else if (msg.type === 'variables-created') {
-        alert('Responsive variables created.');
-      } else if (msg.type === 'grids-created') {
-        // no-op
+        setStatus(msg.message, 'err');
+      } else if (msg.type === 'variables-updated') {
+        setStatus(msg.silent ? 'Variables synced' : 'Variables updated', 'ok');
+        clearTimeout(window.__statusTimer);
+        window.__statusTimer = setTimeout(() => setStatus(''), 2000);
       }
     };
 
     render();
+    // Initial preview push so frames appear immediately on open.
+    pushPreview();
   </script>
 </body>
 
