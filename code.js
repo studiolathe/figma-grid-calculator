@@ -270,7 +270,7 @@ function upsertResponsiveVariables(devices) {
 
     const pushVar = upsertVariable(collection, `grid/push/col-push-${i}`, 'FLOAT');
     setForAll(pushVar, (d) => {
-      if (i <= d.columns) return d.columnWidth * i + d.gutterWidth * (i - 1);
+      if (i <= d.columns) return d.columnWidth * i + d.gutterWidth * i;
       return d.contentWidth;
     });
   }
