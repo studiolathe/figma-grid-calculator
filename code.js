@@ -225,13 +225,16 @@ function upsertResponsiveVariables(devices) {
 
   // Migrate legacy variable names (preserves bindings).
   const legacyWidthRegex = /^grid\/column-widths\/(\d+) col$/;
-  const legacyPushRegex = /^grid\/push\/column-push-(\d+)$/;
+  const legacyPushColumnRegex = /^grid\/push\/column-push-(\d+)$/;
+  const legacyPushRegex = /^grid\/push\/col-push-(\d+)$/;
   figma.variables.getLocalVariables('FLOAT').forEach(v => {
     if (v.variableCollectionId !== collection.id) return;
     const widthMatch = legacyWidthRegex.exec(v.name);
     if (widthMatch) { v.name = `grid/column-widths/col-span-${widthMatch[1]}`; return; }
+    const pushColumnMatch = legacyPushColumnRegex.exec(v.name);
+    if (pushColumnMatch) { v.name = `grid/start/col-start-${pushColumnMatch[1]}`; return; }
     const pushMatch = legacyPushRegex.exec(v.name);
-    if (pushMatch) { v.name = `grid/push/col-push-${pushMatch[1]}`; }
+    if (pushMatch) { v.name = `grid/start/col-start-${pushMatch[1]}`; }
   });
 
   const modeIds = reconcileModes(collection, devices);
@@ -268,16 +271,16 @@ function upsertResponsiveVariables(devices) {
       return d.contentWidth;
     });
 
-    const pushVar = upsertVariable(collection, `grid/push/col-push-${i}`, 'FLOAT');
-    setForAll(pushVar, (d) => {
+    const startVar = upsertVariable(collection, `grid/start/col-start-${i}`, 'FLOAT');
+    setForAll(startVar, (d) => {
       if (i <= d.columns) return d.columnWidth * i + d.gutterWidth * i;
       return d.contentWidth;
     });
   }
 
-  // Prune stale col-span and col-push variables beyond maxCols.
+  // Prune stale col-span and col-start variables beyond maxCols.
   const colWidthRegex = /^grid\/column-widths\/col-span-(\d+)$/;
-  const colPushRegex = /^grid\/push\/col-push-(\d+)$/;
+  const colStartRegex = /^grid\/start\/col-start-(\d+)$/;
   figma.variables.getLocalVariables('FLOAT').forEach(v => {
     if (v.variableCollectionId !== collection.id) return;
     const widthMatch = colWidthRegex.exec(v.name);
@@ -285,8 +288,8 @@ function upsertResponsiveVariables(devices) {
       v.remove();
       return;
     }
-    const pushMatch = colPushRegex.exec(v.name);
-    if (pushMatch && parseInt(pushMatch[1], 10) > maxCols) {
+    const startMatch = colStartRegex.exec(v.name);
+    if (startMatch && parseInt(startMatch[1], 10) > maxCols) {
       v.remove();
     }
   });
