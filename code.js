@@ -31,30 +31,46 @@ function hydrateFromCollection() {
   if (!collection || collection.modes.length === 0) return null;
 
   const allFloat = figma.variables.getLocalVariables('FLOAT');
-  const findVar = (name) => allFloat.find(v =>
-    v.variableCollectionId === collection.id && v.name === name);
+  const findVar = (candidates) => {
+    for (const name of candidates) {
+      const hit = allFloat.find(v =>
+        v.variableCollectionId === collection.id && v.name === name);
+      if (hit) return hit;
+    }
+    return null;
+  };
 
-  const screenWidth = findVar('displays/screen-width');
-  const colCount = findVar('grid/column-count');
-  const margin = findVar('grid/margin');
-  const gutter = findVar('grid/gutter');
+  // Accept multiple legacy / alternative naming conventions.
+  const screenWidth = findVar(['displays/screen-width', 'screen-width']);
+  const colCount    = findVar(['grid/column-count', 'column-count']);
+  const margin      = findVar(['grid/margin', 'grid/margin-inset', 'grid/margin-default', 'margin', 'margin-inset', 'margin-default']);
+  const gutter      = findVar(['grid/gutter', 'grid/gutter-default', 'gutter', 'gutter-default']);
 
   if (!screenWidth || !colCount || !margin || !gutter) return null;
 
-  const readFloat = (variable, modeId) => {
-    const v = variable.valuesByMode[modeId];
-    return typeof v === 'number' ? v : NaN;
+  // Follow VARIABLE_ALIAS chains until we get a number (or give up).
+  const resolveNumber = (value, modeId, depth) => {
+    if (depth > 8) return NaN;
+    if (typeof value === 'number') return value;
+    if (value && value.type === 'VARIABLE_ALIAS') {
+      const target = figma.variables.getVariableById(value.id);
+      if (!target) return NaN;
+      return resolveNumber(target.valuesByMode[modeId], modeId, depth + 1);
+    }
+    return NaN;
   };
+
+  const read = (variable, modeId) =>
+    resolveNumber(variable.valuesByMode[modeId], modeId, 0);
 
   const devices = collection.modes.map(mode => ({
     name: mode.name,
-    maxWidth: readFloat(screenWidth, mode.modeId),
-    columns: readFloat(colCount, mode.modeId),
-    gutterWidth: readFloat(gutter, mode.modeId),
-    marginWidth: readFloat(margin, mode.modeId),
+    maxWidth: read(screenWidth, mode.modeId),
+    columns: read(colCount, mode.modeId),
+    gutterWidth: read(gutter, mode.modeId),
+    marginWidth: read(margin, mode.modeId),
   }));
 
-  // Reject if any value is non-numeric (likely an alias to another collection).
   if (devices.some(d => !Number.isFinite(d.maxWidth) || !Number.isFinite(d.columns) ||
                         !Number.isFinite(d.gutterWidth) || !Number.isFinite(d.marginWidth))) {
     return null;
